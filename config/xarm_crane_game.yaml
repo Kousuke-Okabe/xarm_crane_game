@@ -1,0 +1,8 @@
+joy_to_servo_node:
+  ros__parameters:
+    GAIN_X: -1.0
+    GAIN_Y: -1.0
+    GAIN_Z: 1.0
+    GAIN_Z_ANGULAR: -5.0
+    TWIST_SL: 0.2
+    GAIN_JOG: -1.0
