@@ -88,9 +88,17 @@ def generate_launch_description():
             )
         ]
     )
+
+    hand_control_node = Node(
+        package = 'hand_control_node',
+        executable = 'hand_control_node',
+        name = 'hand_control_node',
+        output = 'screen'
+    )
     
     return LaunchDescription([
         robot_moveit_servo_launch,
         # robot_driver_launch,
-        delayd_node
+        delayd_node,
+        hand_control_node
     ])
