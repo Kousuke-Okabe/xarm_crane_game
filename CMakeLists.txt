@@ -14,6 +14,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(control_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(hand_control_interfaces REQUIRED)
+find_package(tf2 REQUIRED)
 
 add_executable(joy_to_servo_node src/xarm_joystick_crane.cpp)
 ament_target_dependencies(
@@ -25,6 +26,7 @@ ament_target_dependencies(
   control_msgs
   std_srvs
   hand_control_interfaces
+  tf2
 )
 
 install(TARGETS

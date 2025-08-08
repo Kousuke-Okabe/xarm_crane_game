@@ -4,6 +4,22 @@
 #include <control_msgs/msg/joint_jog.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include <hand_control_interfaces/msg/move_hand.hpp>
+#include <sensor_msgs/msg/joint_state.hpp>
+#include <tf2/LinearMath/Quaternion.h>
+
+#define al_1    0
+#define al_2    -M_PI / 2
+#define al_3    0
+#define al_4    -M_PI / 2
+#define al_5     M_PI / 2
+#define al_6    -M_PI / 2
+
+#define off_1   0
+#define off_2   -1.3849179
+#define off_3    1.3849179
+#define off_4   0.0
+#define off_5   0.0
+#define off_6   0.0
 
 using namespace std::chrono_literals;
 
@@ -14,9 +30,9 @@ class JoystickCraneNode : public rclcpp::Node{
                 "/servo_server/delta_twist_cmds", 10
             );
 
-            joint_pub_ = this->create_publisher<control_msgs::msg::JointJog>(
-                "/servo_server/delta_joint_cmds", 10
-            );
+            // joint_pub_ = this->create_publisher<control_msgs::msg::JointJog>(
+            //     "/servo_server/delta_joint_cmds", 10
+            // );
             
             hand_pub_ = this->create_publisher<hand_control_interfaces::msg::MoveHand>(
                 "/hand_control", 10
@@ -24,6 +40,10 @@ class JoystickCraneNode : public rclcpp::Node{
         
             joy_sub_ = this->create_subscription<sensor_msgs::msg::Joy>(
                 "joy", 10, std::bind(&JoystickCraneNode::subscribe_joy, this, std::placeholders::_1)
+            );
+
+            jointState_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
+                "/joint_states", 10, std::bind(&JoystickCraneNode::subscribe_jointState, this, std::placeholders::_1)
             );
 
             timer_ = this->create_wall_timer(
@@ -49,11 +69,12 @@ class JoystickCraneNode : public rclcpp::Node{
 
     private:
         rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr twist_pub_;
-        rclcpp::Publisher<control_msgs::msg::JointJog>::SharedPtr joint_pub_;
+        // rclcpp::Publisher<control_msgs::msg::JointJog>::SharedPtr joint_pub_;
         
         rclcpp::Publisher<hand_control_interfaces::msg::MoveHand>::SharedPtr hand_pub_;
 
         rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_sub_;
+        rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr jointState_sub_;
 
         rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr servo_start_client_;
 
@@ -65,7 +86,19 @@ class JoystickCraneNode : public rclcpp::Node{
         double GAIN_X, GAIN_Y, GAIN_Z, GAIN_Z_ANGULAR, TWIST_SL;
         int HAND_ID;
 
+        double al[6] = {al_1, al_2, al_3, al_4, al_5, al_6};
+        double off[6] = {off_1, off_2, off_3, off_4, off_5, off_6};
+        double joint_pos[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+        tf2::Quaternion quaternion_ee;
+        tf2::Quaternion quaternion_ref;
+        tf2::Quaternion quaternion_sub;
+
         void subscribe_joy(const sensor_msgs::msg::Joy::SharedPtr msg) {
+            quaternion_ref.setW(0.0);
+            quaternion_ref.setX(-1.0);
+            quaternion_ref.setY(0.0);
+            quaternion_ref.setZ(0.0);
+
             // Move Twist
             twist_cmd_.header.frame_id = "link_base";
 
@@ -73,6 +106,11 @@ class JoystickCraneNode : public rclcpp::Node{
             twist_cmd_.twist.linear.y = msg->axes[0] * GAIN_Y;
             twist_cmd_.twist.linear.z = msg->axes[4] * GAIN_Z;
             twist_cmd_.twist.angular.z = (msg->axes[2] - msg->axes[5]) * GAIN_Z_ANGULAR;
+
+            // Control orientation
+            quaternion_sub = quaternion_ref * quaternion_ee.inverse();
+            twist_cmd_.twist.angular.x = GAIN_Z_ANGULAR*( quaternion_sub.getX() );
+            twist_cmd_.twist.angular.y = GAIN_Z_ANGULAR*( quaternion_sub.getY() );
 
 
             // Soft limit
@@ -94,6 +132,43 @@ class JoystickCraneNode : public rclcpp::Node{
                 hand_cmd_.id = HAND_ID;
                 hand_cmd_.state = 'O'; // Close
             }    
+        }
+
+        void subscribe_jointState(const sensor_msgs::msg::JointState::SharedPtr msg) {
+            // Get joint positions
+            for(int i = 0; i < 6; i++) {
+                joint_pos[i] = msg->position[i];
+            }
+
+            // Calculate the quaternions for the end effector
+            quaternion_ee.setW(1.0);
+            quaternion_ee.setX(0.0);
+            quaternion_ee.setY(0.0);
+            quaternion_ee.setZ(0.0);
+
+            for(int i = 0; i < 6; i++){
+                tf2::Quaternion qua_a, qua_o, qua_th;
+
+                qua_a.setW( cos(al[i] / 2) );
+                qua_a.setX( sin(al[i] / 2) );
+                qua_a.setY( 0.0 );
+                qua_a.setZ( 0.0 );
+
+                qua_o.setW( cos(off[i] / 2) );
+                qua_o.setX( 0.0 );
+                qua_o.setY( 0.0 );
+                qua_o.setZ( sin(off[i] / 2) );
+
+                qua_th.setW( cos(joint_pos[i] / 2) );
+                qua_th.setX( 0.0 );
+                qua_th.setY( 0.0 );
+                qua_th.setZ( sin(joint_pos[i] / 2) );
+
+                quaternion_ee = qua_th * qua_o * qua_a * quaternion_ee;
+            }
+
+            // RCLCPP_INFO(this->get_logger(), "Quaternion EE: [%f, %f, %f, %f]",
+            //     quaternion_ee.getX(), quaternion_ee.getY(), quaternion_ee.getZ(), quaternion_ee.getW());
         }
 
         void timer_callback() {
